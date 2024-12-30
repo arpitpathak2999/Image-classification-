@@ -3,12 +3,23 @@ import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image
-import numpy as np
+import pandas as pd
+import os
+
+# Directory and CSV setup
+SAVE_DIR = "user_data"
+os.makedirs(SAVE_DIR, exist_ok=True)
+CSV_FILE = os.path.join(SAVE_DIR, "patient_data.csv")
+
+# Initialize CSV file if not exists
+if not os.path.exists(CSV_FILE):
+    columns = ["Name", "Age", "Tender/swollen anterior cervical lymph nodes", "Patient ID", "Phone", "Fever", "Cough", "Prediction", "Doctor's Decision", "Image Path"]
+    pd.DataFrame(columns=columns).to_csv(CSV_FILE, index=False)
 
 # Load the pre-trained model
-device = torch.device("cpu")  # Force the device to CPU
+device = torch.device("cpu")  # CPU-only
 
-# Define the model architecture (same as in your training code)
+# Define the model architecture
 model = models.resnet50(pretrained=True)
 num_features = model.fc.in_features
 model.fc = nn.Sequential(
@@ -16,51 +27,94 @@ model.fc = nn.Sequential(
     nn.Sigmoid()
 )
 
-# Load the best model weights
-model.load_state_dict(torch.load('best_model.pth', map_location=device))
+# Load model weights
+model.load_state_dict(torch.load("best_model.pth", map_location=device))
 model = model.to(device)
 model.eval()
 
-# Define the transform (same as in your training code)
+# Image transformation
 transform = transforms.Compose([
     transforms.Resize((512, 512)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
-# Function to predict the class of an image
+# Function to predict image class
 def predict_image(image):
-    image = transform(image).unsqueeze(0).to(device)  # Add batch dimension and send to device
+    image = transform(image).unsqueeze(0).to(device)
     with torch.no_grad():
         output = model(image)
-        prediction = output.item()  # Get the predicted probability
+        prediction = output.item()
     return prediction
 
 # Streamlit UI
-st.title("Image Classification with ResNet50")
-st.write("Upload an image to classify and see the predicted class.")
+st.title("Antibiotic Requirement Evaluation in Sore Throat (A.R.E.S.T)")
+st.markdown("Fill in patient details, upload an image, and save results. The model will predict whether antibiotics are required based on the image.")
 
-# Upload image for prediction
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+# Use a two-column layout for input fields
+col1, col2 = st.columns(2)
 
-if uploaded_file is not None:
-    # Read and display the image
-    image = Image.open(uploaded_file)
-    
-    # Display the uploaded image
+# Input fields for patient information
+with col1:
+    name = st.text_input("Name", key="name")
+    age = st.number_input("Age", min_value=0, max_value=120, step=1, key="age")
+    lymph_nodes = st.selectbox("Tender/swollen anterior cervical lymph nodes", ["Yes", "No"], key="lymph_nodes")
+    fever = st.selectbox("Fever", ["Yes", "No"], key="fever")
+
+with col2:
+    patient_id = st.text_input("Patient ID", key="patient_id")
+    phone = st.text_input("Phone Number", key="phone")
+    cough = st.selectbox("Cough", ["Yes", "No"], key="cough")
+
+# File uploader for image
+file_uploader = st.file_uploader("Choose an image (JPG, JPEG, PNG)...", type=["jpg", "jpeg", "png"])
+
+# Display uploaded image
+if file_uploader:
+    image = Image.open(file_uploader)
     st.image(image, caption="Uploaded Image", use_column_width=True)
     
-    # Predict the class of the image
+    # Predict image class
     prediction = predict_image(image)
-    
-    # Display the result as binary classification with bold text and color
     if prediction > 0.5:
         prediction_class = "Antibiotic required"
-        st.markdown(f"### **{prediction_class}**")
+        st.markdown(f"### **{prediction_class}**", unsafe_allow_html=True)
     else:
         prediction_class = "Antibiotic not required"
-        st.markdown(f"**{prediction_class}**")
+        st.markdown(f"### **{prediction_class}**", unsafe_allow_html=True)
 
-# Add a button to reset or clear the image upload
-if st.button("Clear Image"):
-    st.experimental_rerun()
+    # Add doctor's decision
+    doctor_decision = st.selectbox("Doctor's Decision", 
+                                  ["Antibiotic required", "Not required", "Rejected", "Throat swab first", "Wait and watch"])
+
+# Submit button with feedback
+submit_button = st.button("Submit", help="Click here to save the data and results")
+
+if submit_button:
+    if name and age and lymph_nodes and patient_id and phone and fever and cough and file_uploader and doctor_decision:
+        # Save image locally
+        image_path = os.path.join(SAVE_DIR, f"{patient_id}_{file_uploader.name}")
+        image.save(image_path)
+        
+        # Save patient details to CSV
+        new_entry = pd.DataFrame([{
+            "Name": name,
+            "Age": age,
+            "Tender/swollen anterior cervical lymph nodes": lymph_nodes,
+            "Patient ID": patient_id,
+            "Phone": phone,
+            "Fever": fever,
+            "Cough": cough,
+            "Prediction": prediction_class,
+            "Doctor's Decision": doctor_decision,
+            "Image Path": image_path
+        }])
+        
+        # Append to CSV using pd.concat()
+        existing_data = pd.read_csv(CSV_FILE)
+        updated_data = pd.concat([existing_data, new_entry], ignore_index=True)
+        updated_data.to_csv(CSV_FILE, index=False)
+        
+        st.success("Recorded successfully!")
+    else:
+        st.error("Please fill all the required fields and upload an image before submitting.")
