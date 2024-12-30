@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 
 # Load the pre-trained model
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")  # Force the device to CPU
 
 # Define the model architecture (same as in your training code)
 model = models.resnet50(pretrained=True)
@@ -17,7 +17,7 @@ model.fc = nn.Sequential(
 )
 
 # Load the best model weights
-model.load_state_dict(torch.load('best_model.pth'))
+model.load_state_dict(torch.load('best_model.pth', map_location=device))
 model = model.to(device)
 model.eval()
 
@@ -37,7 +37,7 @@ def predict_image(image):
     return prediction
 
 # Streamlit UI
-st.title("Interactive Image Classification with ResNet50")
+st.title("Image Classification with ResNet50")
 st.write("Upload an image to classify and see the predicted class.")
 
 # Upload image for prediction
@@ -56,10 +56,10 @@ if uploaded_file is not None:
     # Display the result as binary classification with bold text and color
     if prediction > 0.5:
         prediction_class = "Antibiotic required"
-        st.markdown(f"### **Prediction: {prediction_class}**")
+        st.markdown(f"### **{prediction_class}**")
     else:
         prediction_class = "Antibiotic not required"
-        st.markdown(f"### **Prediction: {prediction_class}**")
+        st.markdown(f"**{prediction_class}**")
 
 # Add a button to reset or clear the image upload
 if st.button("Clear Image"):
